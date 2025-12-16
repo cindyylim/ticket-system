@@ -1,0 +1,157 @@
+.seat-selection {
+    padding: 60px 0;
+    min-height: 100vh;
+}
+
+.seat-selection h1 {
+    margin-bottom: 8px;
+}
+
+.subtitle {
+    color: var(--text-secondary);
+    margin-bottom: 40px;
+}
+
+.seat-selection-layout {
+    display: grid;
+    grid-template-columns: 1fr 350px;
+    gap: 40px;
+}
+
+.seat-map {
+    display: grid;
+    gap: 40px;
+}
+
+.section {
+    background: var(--background-card);
+    padding: 30px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.section-title {
+    margin-bottom: 20px;
+    color: var(--primary-blue);
+}
+
+.rows-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.row-label {
+    min-width: 60px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: right;
+}
+
+.seats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(45px, 1fr));
+    gap: 8px;
+    flex: 1;
+}
+
+.seat {
+    width: 45px;
+    height: 45px;
+    border-radius: 8px 8px 0 0;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+.seat-available {
+    background: var(--success);
+    color: white;
+}
+
+.seat-available:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(0, 216, 90, 0.4);
+}
+
+.seat-selected {
+    background: var(--primary-blue);
+    color: white;
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(2, 108, 223, 0.4);
+}
+
+.seat-locked {
+    background: var(--warning);
+    color: white;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.seat-booked {
+    background: var(--text-muted);
+    color: var(--background-dark);
+    cursor: not-allowed;
+    opacity: 0.4;
+}
+
+.selection-sidebar {
+    position: sticky;
+    top: 100px;
+    height: fit-content;
+}
+
+.legend {
+    display: grid;
+    gap: 12px;
+    margin: 24px 0;
+    padding: 20px 0;
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+}
+
+.seat-demo {
+    width: 30px;
+    height: 30px;
+    border-radius: 6px 6px 0 0;
+}
+
+.selection-summary {
+    margin: 24px 0;
+}
+
+.selection-summary p {
+    margin: 12px 0;
+}
+
+.total-price {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--primary-blue);
+}
+
+@media (max-width: 992px) {
+    .seat-selection-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .selection-sidebar {
+        position: static;
+    }
+}
