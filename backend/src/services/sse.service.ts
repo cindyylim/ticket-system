@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { redisService } from './redis.service';
 
 interface SseClient {
     id: string;
@@ -9,6 +10,27 @@ interface SseClient {
 class SseService {
     private clients: Map<string, SseClient> = new Map(); // clientId -> client
     private eventChannels: Map<string, Set<string>> = new Map(); // eventId -> Set of clientIds
+    private readonly REDIS_CHANNEL_PREFIX = 'event:';
+    private readonly REDIS_CHANNEL_SUFFIX = ':updates';
+
+    constructor() {
+        this.initRedisSubscription();
+    }
+
+    private async initRedisSubscription(): Promise<void> {
+        try {
+            await redisService.psubscribe(`${this.REDIS_CHANNEL_PREFIX}*${this.REDIS_CHANNEL_SUFFIX}`, (channel, message) => {
+                const eventId = channel.replace(this.REDIS_CHANNEL_PREFIX, '').replace(this.REDIS_CHANNEL_SUFFIX, '');
+                const data = JSON.parse(message);
+
+                console.log(`📡 SSE received Redis message for event ${eventId}`);
+                this.localBroadcast(eventId, data);
+            });
+            console.log('📡 SSE service subscribed to Redis updates');
+        } catch (error) {
+            console.error('❌ Failed to initialize Redis subscription for SSE:', error);
+        }
+    }
 
     // Register a new SSE client
     addClient(clientId: string, eventId: string, response: Response): void {
@@ -84,15 +106,26 @@ class SseService {
         }
     }
 
-    // Broadcast message to all clients watching a specific event
-    broadcastToEvent(eventId: string, data: any): void {
+    // Broadcast message to all instances via Redis
+    async broadcastToEvent(eventId: string, data: any): Promise<void> {
+        try {
+            const channel = `${this.REDIS_CHANNEL_PREFIX}${eventId}${this.REDIS_CHANNEL_SUFFIX}`;
+            await redisService.publish(channel, JSON.stringify(data));
+        } catch (error) {
+            console.error(`❌ Error publishing SSE update to Redis for event ${eventId}:`, error);
+            // Fallback to local broadcast if Redis fails
+            this.localBroadcast(eventId, data);
+        }
+    }
+
+    // Broadcast message only to clients connected to this instance
+    private localBroadcast(eventId: string, data: any): void {
         const channel = this.eventChannels.get(eventId);
         if (!channel || channel.size === 0) {
-            console.log(`📡 No clients connected for event ${eventId}, skipping broadcast`);
             return;
         }
 
-        console.log(`📡 Broadcasting to ${channel.size} clients for event ${eventId}:`, data);
+        console.log(`📡 Local broadcasting to ${channel.size} clients for event ${eventId}`);
 
         for (const clientId of channel) {
             this.sendToClient(clientId, data);

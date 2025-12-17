@@ -10,9 +10,9 @@ router.get('/status/:eventId', authMiddleware, async (req: AuthRequest, res: Res
         const { eventId } = req.params;
         const userId = req.userId!;
 
-        const position = queueService.getPosition(eventId, userId);
-        const stats = queueService.getQueueStats(eventId);
-        const canProceed = queueService.canProceed(eventId, userId);
+        const position = await queueService.getPosition(eventId, userId);
+        const stats = await queueService.getQueueStats(eventId);
+        const canProceed = await queueService.canProceed(eventId, userId);
 
         res.json({
             position,

@@ -20,11 +20,11 @@ router.post('/lock', authMiddleware, async (req: AuthRequest, res: Response): Pr
 
         // Join queue
         const requestId = uuidv4();
-        const position = queueService.joinQueue(eventId, userId, requestId);
+        const position = await queueService.joinQueue(eventId, userId, requestId);
 
         // Check if can proceed
-        if (!queueService.canProceed(eventId, userId)) {
-            const stats = queueService.getQueueStats(eventId);
+        if (!(await queueService.canProceed(eventId, userId))) {
+            const stats = await queueService.getQueueStats(eventId);
             res.json({
                 queued: true,
                 position,
@@ -36,7 +36,7 @@ router.post('/lock', authMiddleware, async (req: AuthRequest, res: Response): Pr
 
         // Try to lock seats
         const result = await bookingService.lockSeats(eventId, seatIds, userId);
-        queueService.removeFromQueue(eventId, userId);
+        await queueService.removeFromQueue(eventId, userId);
 
         if (result.success) {
             res.json({
@@ -60,9 +60,9 @@ router.get('/queue/:eventId', authMiddleware, async (req: AuthRequest, res: Resp
         const { eventId } = req.params;
         const userId = req.userId!;
 
-        const position = queueService.getPosition(eventId, userId);
-        const stats = queueService.getQueueStats(eventId);
-        const canProceed = queueService.canProceed(eventId, userId);
+        const position = await queueService.getPosition(eventId, userId);
+        const stats = await queueService.getQueueStats(eventId);
+        const canProceed = await queueService.canProceed(eventId, userId);
 
         res.json({
             inQueue: position !== null,

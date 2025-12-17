@@ -1,3 +1,5 @@
+import { redisService } from './redis.service';
+
 interface QueueEntry {
     userId: string;
     timestamp: number;
@@ -5,97 +7,126 @@ interface QueueEntry {
 }
 
 class QueueService {
-    private queue: Map<string, QueueEntry[]> = new Map(); // eventId -> queue entries (waiting users)
-    private activeUsers: Map<string, Set<string>> = new Map(); // eventId -> active users (allowed to proceed)
     private readonly MAX_CONCURRENT_PROCESSING = 10; // Process 10 bookings at a time per event
     private readonly PROCESSING_INTERVAL = 2000; // Process every 2 seconds
+    private readonly PROCESSING_LOCK_TTL = 5; // Lock TTL in seconds
     private processingIntervals: Map<string, NodeJS.Timeout> = new Map();
 
+    // Redis key helpers
+    private getQueueKey(eventId: string): string {
+        return `queue:${eventId}`;
+    }
+
+    private getActiveKey(eventId: string): string {
+        return `active:${eventId}`;
+    }
+
+    private getProcessingLockKey(eventId: string): string {
+        return `processing:${eventId}`;
+    }
+
+    // Serialize queue entry to store in sorted set
+    private serializeEntry(userId: string, requestId: string): string {
+        return `${userId}:${requestId}`;
+    }
+
+    // Deserialize queue entry from sorted set
+    private deserializeEntry(member: string): { userId: string; requestId: string } {
+        const [userId, requestId] = member.split(':');
+        return { userId, requestId };
+    }
+
     // Join queue for an event
-    joinQueue(eventId: string, userId: string, requestId: string): number {
+    async joinQueue(eventId: string, userId: string, requestId: string): Promise<number> {
         // If user is already active, return 0 (meaning pass through)
-        if (this.canProceed(eventId, userId)) {
+        if (await this.canProceed(eventId, userId)) {
             return 0;
         }
 
-        if (!this.queue.has(eventId)) {
-            this.queue.set(eventId, []);
+        const queueKey = this.getQueueKey(eventId);
+        const member = this.serializeEntry(userId, requestId);
+        const timestamp = Date.now();
+
+        // Add to sorted set with timestamp as score
+        await redisService.zadd(queueKey, timestamp, member);
+
+        // Start processing if not already started
+        if (!this.processingIntervals.has(eventId)) {
             this.startProcessing(eventId);
         }
 
-        const eventQueue = this.queue.get(eventId)!;
+        // Get position (1-indexed)
+        const rank = await redisService.zrank(queueKey, member);
+        const position = rank !== null ? rank + 1 : 1;
 
-        // Check if user is already in queue
-        const existingIndex = eventQueue.findIndex(entry => entry.userId === userId);
-        if (existingIndex !== -1) {
-            return existingIndex + 1; // Return existing position (1-indexed)
-        }
-
-        eventQueue.push({
-            userId,
-            timestamp: Date.now(),
-            requestId,
-        });
-
-        const position = eventQueue.length;
         console.log(`📋 User ${userId} joined queue for event ${eventId} at position ${position}`);
 
         return position;
     }
 
     // Get user's position in queue
-    getPosition(eventId: string, userId: string): number | null {
+    async getPosition(eventId: string, userId: string): Promise<number | null> {
         // If active, they are not in the "waiting" queue
-        if (this.canProceed(eventId, userId)) {
+        if (await this.canProceed(eventId, userId)) {
             return 0;
         }
 
-        const eventQueue = this.queue.get(eventId);
-        if (!eventQueue) return null;
+        const queueKey = this.getQueueKey(eventId);
 
-        const index = eventQueue.findIndex(entry => entry.userId === userId);
-        return index === -1 ? null : index + 1; // 1-indexed
+        // Find any entry for this user (they might have multiple requests)
+        const allMembers = await redisService.zrange(queueKey, 0, -1);
+
+        for (let i = 0; i < allMembers.length; i++) {
+            const { userId: entryUserId } = this.deserializeEntry(allMembers[i]);
+            if (entryUserId === userId) {
+                return i + 1; // 1-indexed position
+            }
+        }
+
+        return null;
     }
 
     // Remove user from queue (after successful booking or cancellation)
-    removeFromQueue(eventId: string, userId: string): void {
+    async removeFromQueue(eventId: string, userId: string): Promise<void> {
+        const queueKey = this.getQueueKey(eventId);
+        const activeKey = this.getActiveKey(eventId);
+
         // Remove from active users if present
-        if (this.activeUsers.has(eventId)) {
-            this.activeUsers.get(eventId)!.delete(userId);
+        await redisService.srem(activeKey, userId);
+
+        // Remove all entries for this user from waiting queue
+        const allMembers = await redisService.zrange(queueKey, 0, -1);
+        const toRemove = allMembers.filter(member => {
+            const { userId: entryUserId } = this.deserializeEntry(member);
+            return entryUserId === userId;
+        });
+
+        if (toRemove.length > 0) {
+            await redisService.zrem(queueKey, ...toRemove);
+            console.log(`📋 User ${userId} removed from queue for event ${eventId}`);
         }
 
-        // Remove from waiting queue if present
-        const eventQueue = this.queue.get(eventId);
-        if (eventQueue) {
-            const index = eventQueue.findIndex(entry => entry.userId === userId);
-            if (index !== -1) {
-                eventQueue.splice(index, 1);
-                console.log(`📋 User ${userId} removed from queue for event ${eventId}`);
-            }
+        // Clean up if everything is empty
+        const queueLength = await redisService.zcard(queueKey);
+        const activeCount = await redisService.scard(activeKey);
 
-            // Clean up if everything is empty
-            if (eventQueue.length === 0 && (!this.activeUsers.has(eventId) || this.activeUsers.get(eventId)!.size === 0)) {
-                this.stopProcessing(eventId);
-                this.queue.delete(eventId);
-                this.activeUsers.delete(eventId);
-            }
+        if (queueLength === 0 && activeCount === 0) {
+            this.stopProcessing(eventId);
+            // Keys will auto-expire or can be cleaned up separately
         }
     }
 
     // Check if user can proceed (is in active set)
-    canProceed(eventId: string, userId: string): boolean {
-        // If we have an active set for this event, check if user is in it
-        return this.activeUsers.get(eventId)?.has(userId) ?? false;
+    async canProceed(eventId: string, userId: string): Promise<boolean> {
+        const activeKey = this.getActiveKey(eventId);
+        return await redisService.sismember(activeKey, userId);
     }
 
     // Get queue stats
-    getQueueStats(eventId: string): { length: number; estimatedWaitTime: number } {
-        const eventQueue = this.queue.get(eventId);
-        if (!eventQueue) {
-            return { length: 0, estimatedWaitTime: 0 };
-        }
+    async getQueueStats(eventId: string): Promise<{ length: number; estimatedWaitTime: number }> {
+        const queueKey = this.getQueueKey(eventId);
+        const length = await redisService.zcard(queueKey);
 
-        const length = eventQueue.length;
         // Estimate: each batch processes every PROCESSING_INTERVAL ms
         const batchesAhead = Math.ceil(length / this.MAX_CONCURRENT_PROCESSING);
         const estimatedWaitTime = batchesAhead * this.PROCESSING_INTERVAL;
@@ -107,49 +138,81 @@ class QueueService {
     private startProcessing(eventId: string): void {
         if (this.processingIntervals.has(eventId)) return;
 
-        // Initialize active users set if needed
-        if (!this.activeUsers.has(eventId)) {
-            this.activeUsers.set(eventId, new Set());
-        }
-
         console.log(`🚀 Starting queue processing for event ${eventId}`);
 
-        const interval = setInterval(() => {
-            const eventQueue = this.queue.get(eventId);
-            const activeSet = this.activeUsers.get(eventId);
-
-            // Safety check
-            if (!eventQueue || !activeSet) {
-                this.stopProcessing(eventId);
-                return;
+        const interval = setInterval(async () => {
+            try {
+                await this.processQueue(eventId);
+            } catch (error) {
+                console.error(`Error processing queue for event ${eventId}:`, error);
             }
+        }, this.PROCESSING_INTERVAL);
 
-            // If queue is empty, we just wait for more users or eventual cleanup
-            if (eventQueue.length === 0) {
-                if (activeSet.size === 0) {
+        this.processingIntervals.set(eventId, interval);
+    }
+
+    // Process queue batch with distributed lock
+    private async processQueue(eventId: string): Promise<void> {
+        const lockKey = this.getProcessingLockKey(eventId);
+        const queueKey = this.getQueueKey(eventId);
+        const activeKey = this.getActiveKey(eventId);
+
+        // Try to acquire processing lock (distributed lock pattern)
+        const lockAcquired = await redisService.setnx(
+            lockKey,
+            'locked',
+            this.PROCESSING_LOCK_TTL
+        );
+
+        // If we can't acquire the lock, another server is processing
+        if (!lockAcquired) {
+            return;
+        }
+
+        try {
+            const queueLength = await redisService.zcard(queueKey);
+            const activeCount = await redisService.scard(activeKey);
+
+            // If queue is empty, check if we should stop processing
+            if (queueLength === 0) {
+                if (activeCount === 0) {
                     this.stopProcessing(eventId);
                 }
                 return;
             }
 
             // Process a batch of users
-            // We take up to MAX_CONCURRENT_PROCESSING users from the front of the queue
-            const batchSize = Math.min(this.MAX_CONCURRENT_PROCESSING, eventQueue.length);
+            const batchSize = Math.min(this.MAX_CONCURRENT_PROCESSING, queueLength);
 
             if (batchSize > 0) {
-                const batch = eventQueue.splice(0, batchSize);
+                // Atomically pop users from the front of the queue
+                const batch = await redisService.zpopmin(queueKey, batchSize);
 
-                batch.forEach(entry => {
-                    activeSet.add(entry.userId);
-                    console.log(`✅ User ${entry.userId} moved to active state for event ${eventId}`);
+                // batch is an array like [member1, score1, member2, score2, ...]
+                // Extract just the members (every other element starting at index 0)
+                const members = batch.filter((_, index) => index % 2 === 0);
+
+                // Add users to active set
+                const userIds = members.map(member => {
+                    const { userId } = this.deserializeEntry(member);
+                    return userId;
                 });
 
-                console.log(`📋 Processed batch of ${batchSize} users. Remaining in queue: ${eventQueue.length}`);
+                if (userIds.length > 0) {
+                    await redisService.sadd(activeKey, ...userIds);
+
+                    userIds.forEach(userId => {
+                        console.log(`✅ User ${userId} moved to active state for event ${eventId}`);
+                    });
+
+                    const remainingInQueue = await redisService.zcard(queueKey);
+                    console.log(`📋 Processed batch of ${userIds.length} users. Remaining in queue: ${remainingInQueue}`);
+                }
             }
-
-        }, this.PROCESSING_INTERVAL);
-
-        this.processingIntervals.set(eventId, interval);
+        } finally {
+            // Always release the lock
+            await redisService.del(lockKey);
+        }
     }
 
     // Stop processing queue
@@ -163,8 +226,11 @@ class QueueService {
     }
 
     // Get all queues (for debugging)
-    getAllQueues(): Map<string, QueueEntry[]> {
-        return this.queue;
+    async getAllQueues(): Promise<Map<string, QueueEntry[]>> {
+        // This is more complex with Redis - would need to scan for all queue:* keys
+        // For now, return empty map as this is primarily for debugging
+        console.warn('getAllQueues() is not fully implemented for Redis-based queues');
+        return new Map();
     }
 }
 
