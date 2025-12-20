@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { connectDatabase } from './config/database';
 import { errorHandler } from './middleware/error.middleware';
-import { bookingService } from './services/booking.service';
+import { jobService } from './services/job.service';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -47,10 +47,8 @@ const startServer = async () => {
         // Connect to MongoDB
         await connectDatabase();
 
-        // Start cleanup job for expired locks (runs every 2 minutes)
-        setInterval(() => {
-            bookingService.cleanupExpiredLocks();
-        }, 2 * 60 * 1000);
+        // Initialize BullMQ jobs
+        await jobService.scheduleCleanupJob();
 
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
