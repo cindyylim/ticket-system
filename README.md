@@ -25,6 +25,7 @@ A full-stack ticket booking system with **distributed locking**, **Redis caching
 - Node.js + Express + TypeScript
 - MongoDB + Mongoose
 - Redis (ioredis) for caching and distributed locks
+- **BullMQ** for background jobs and message queues
 - JWT for authentication
 - Bcrypt for password hashing
 
@@ -97,7 +98,7 @@ Frontend will run on http://localhost:5173
 ### Distributed Locking
 - Redis SET NX EX command for atomic lock acquisition
 - 10-minute TTL with automatic expiration
-- Background job cleans up expired locks every 2 minutes
+- **BullMQ** background worker cleans up expired locks every 1 minute
 
 ### Caching Strategy
 - Events, venues, performers cached with configurable TTL
@@ -123,6 +124,7 @@ Frontend will run on http://localhost:5173
 - Pagination for large result sets
 - Connection pooling for MongoDB
 - Efficient seat lookup with compound indexes
+- **BullMQ** ensures reliable background processing without blocking the main event loop
 
 ## 🎨 Design Highlights
 
@@ -136,7 +138,6 @@ Frontend will run on http://localhost:5173
 ## 📝 Future Enhancements
 
 - Redis Cluster for high availability
-- Persistent queue (Bull/BullMQ) instead of in-memory
 - Payment integration (Stripe)
 - Email notifications
 - Event recommendations
