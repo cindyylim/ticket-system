@@ -2,6 +2,7 @@ import Redis from 'ioredis';
 import dotenv from "dotenv";
 
 dotenv.config();
+
 class RedisService {
     private client: Redis;
     private subscriberClient: Redis;
@@ -10,22 +11,26 @@ class RedisService {
     constructor() {
         const redisUri = process.env.REDIS_URI;
         if (!redisUri) {
-            throw new Error("REDIS_URI is not defined")
+            throw new Error("REDIS_URI is not defined");
         }
 
-        const redisOptions = {
+        // Upstash provides a full rediss://... connection string which ioredis handles easily.
+        this.client = new Redis(redisUri, {
+            maxRetriesPerRequest: null, // Recommended for BullMQ
             retryStrategy: (times: number) => {
-                const delay = Math.min(times * 50, 2000);
-                return delay;
-            },
-            maxRetriesPerRequest: 3,
-        };
+                return Math.min(times * 50, 2000);
+            }
+        });
 
-        this.client = new Redis(redisUri, redisOptions);
-        this.subscriberClient = new Redis(redisUri, redisOptions);
+        this.subscriberClient = new Redis(redisUri, {
+            maxRetriesPerRequest: null,
+            retryStrategy: (times: number) => {
+                return Math.min(times * 50, 2000);
+            }
+        });
 
         this.client.on('connect', () => {
-            console.log('✅ Redis connected');
+            console.log('✅ Redis (ioredis) connected');
             this.isConnected = true;
         });
 
@@ -47,6 +52,10 @@ class RedisService {
         return this.client;
     }
 
+    getSubscriberClient(): Redis {
+        return this.subscriberClient;
+    }
+
     isReady(): boolean {
         return this.isConnected;
     }
@@ -57,7 +66,7 @@ class RedisService {
 
     async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
         if (ttlSeconds) {
-            await this.client.setex(key, ttlSeconds, value);
+            await this.client.set(key, value, 'EX', ttlSeconds);
         } else {
             await this.client.set(key, value);
         }
@@ -73,8 +82,10 @@ class RedisService {
         }
     }
 
-    async del(key: string): Promise<void> {
-        await this.client.del(key);
+    async del(...keys: string[]): Promise<void> {
+        if (keys.length > 0) {
+            await this.client.del(...keys);
+        }
     }
 
     async exists(key: string): Promise<boolean> {
@@ -82,7 +93,6 @@ class RedisService {
         return result === 1;
     }
 
-    // Pattern-based deletion (e.g., delete all keys matching "event:*")
     async delPattern(pattern: string): Promise<void> {
         const keys = await this.client.keys(pattern);
         if (keys.length > 0) {
@@ -92,9 +102,10 @@ class RedisService {
 
     async disconnect(): Promise<void> {
         await this.client.quit();
+        await this.subscriberClient.quit();
     }
 
-    // Sorted Set operations for queue management
+    // Sorted Set operations
     async zadd(key: string, score: number, member: string): Promise<number> {
         return await this.client.zadd(key, score, member);
     }
@@ -119,7 +130,7 @@ class RedisService {
         return await this.client.zrange(key, start, stop);
     }
 
-    // Set operations for active users management
+    // Set operations
     async sadd(key: string, ...members: string[]): Promise<number> {
         return await this.client.sadd(key, ...members);
     }
