@@ -241,6 +241,7 @@ class BookingService {
                         userId: seat.lockedBy?.toString() || '',
                         eventId: seat.eventId.toString(),
                     });
+                    await lockService.releaseLock(lockResource, lockService.getLockKey(lockResource));
                     console.log(`🔓 Releasing seat ${seat._id} - Lock TTL exceeded`);
                 }
             }

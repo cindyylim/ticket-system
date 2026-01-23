@@ -93,7 +93,7 @@ class LockService {
     }
 
     // Generate lock key for a resource
-    private getLockKey(resource: string): string {
+    public getLockKey(resource: string): string {
         return `lock:${resource}`;
     }
 

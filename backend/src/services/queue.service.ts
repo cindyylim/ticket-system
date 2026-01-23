@@ -1,11 +1,5 @@
 import { redisService } from './redis.service';
 
-interface QueueEntry {
-    userId: string;
-    timestamp: number;
-    requestId: string;
-}
-
 class QueueService {
     private readonly MAX_CONCURRENT_PROCESSING = 10; // Process 10 bookings at a time per event
     private readonly PROCESSING_INTERVAL = 2000; // Process every 2 seconds
@@ -223,14 +217,6 @@ class QueueService {
             this.processingIntervals.delete(eventId);
             console.log(`🛑 Stopped processing queue for event ${eventId}`);
         }
-    }
-
-    // Get all queues (for debugging)
-    async getAllQueues(): Promise<Map<string, QueueEntry[]>> {
-        // This is more complex with Redis - would need to scan for all queue:* keys
-        // For now, return empty map as this is primarily for debugging
-        console.warn('getAllQueues() is not fully implemented for Redis-based queues');
-        return new Map();
     }
 }
 

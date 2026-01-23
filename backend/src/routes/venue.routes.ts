@@ -5,7 +5,7 @@ import { cacheService } from '../services/cache.service';
 const router = Router();
 
 // Get all venues
-router.get('/', async (req: Request, res: Response): Promise<void> => {
+router.get('/', async (_: Request, res: Response): Promise<void> => {
     try {
         const venues = await Venue.find().lean();
         res.json(venues);

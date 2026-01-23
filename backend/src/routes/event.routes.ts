@@ -1,7 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { Event } from '../models/Event';
-import { Performer } from '../models/Performer';
-import { Venue } from '../models/Venue';
 import { Seat } from '../models/Seat';
 import { cacheService } from '../services/cache.service';
 import { Types } from 'mongoose';
