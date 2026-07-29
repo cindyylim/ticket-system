@@ -1,4 +1,4 @@
-# TicketHub - Ticketmaster Clone
+# TicketHub 
 
 A full-stack ticket booking system with **distributed locking**, **Redis caching**, **Server-Sent Events (SSE)** for real-time updates, and a **virtual waiting queue** to handle high traffic.
 
@@ -13,7 +13,6 @@ A full-stack ticket booking system with **distributed locking**, **Redis caching
 - **MongoDB Database**: Mongoose models with proper indexing
 
 ### Frontend
-- **Modern UI**: Ticketmaster-inspired design with vibrant blues and smooth animations
 - **Real-Time Updates**: SSE integration shows seat changes live as other users book
 - **Interactive Seat Map**: Visual seat selection with color-coded availability
 - **Responsive Design**: Mobile-friendly interface
