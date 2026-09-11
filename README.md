@@ -1,6 +1,15 @@
 # TicketHub 
 
+<img width="1440" height="785" alt="tickethub-login" src="https://github.com/user-attachments/assets/9fd5d9a6-6a57-4345-b838-e0cf8a4dde80" />
+<img width="1440" height="781" alt="tickethub-dashboard" src="https://github.com/user-attachments/assets/5df7b683-1dde-47c4-9696-6391d6b7fb71" />
+<img width="1440" height="778" alt="tickethub-event" src="https://github.com/user-attachments/assets/dcfa8810-9c63-4787-92e9-5155ec0ad979" />
+<img width="1440" height="778" alt="tickethub-seats" src="https://github.com/user-attachments/assets/dd030ccf-8567-4b98-b035-584a48f4c4fb" />
+<img width="1330" height="720" alt="tickethub-waiting-queue" src="https://github.com/user-attachments/assets/d48db181-3af6-43a6-9bcc-019cb93fa724" />
+<img width="1440" height="778" alt="tickethub-purchase-ticket" src="https://github.com/user-attachments/assets/dc6caa2c-0493-483a-b448-81c6ca488e45" />
+<img width="1440" height="778" alt="tickethub-my-ticket" src="https://github.com/user-attachments/assets/5637a81e-3b73-44f9-8b87-13594d134d46" />
+
 A full-stack ticket booking system with **distributed locking**, **Redis caching**, **Server-Sent Events (SSE)** for real-time updates, and a **virtual waiting queue** to handle high traffic.
+
 
 ## 🚀 Features
 
