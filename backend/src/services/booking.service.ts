@@ -273,12 +273,15 @@ class BookingService {
                 }
                 // Also check if the seat has been locked for longer than the TTL
                 else if (seat.lockedAt && (Date.now() - seat.lockedAt.getTime()) > lockTTL) {
+                    const lockInfo = await lockService.getLockInfo(lockResource);
+                    if (lockInfo?.lockId) {
+                        await lockService.releaseLock(lockResource, lockInfo.lockId);
+                    }
                     seatsToRelease.push({
                         seatId: seat._id,
                         userId: seat.lockedBy?.toString() || '',
                         eventId: seat.eventId.toString(),
                     });
-                    await lockService.releaseLock(lockResource, lockService.getLockKey(lockResource));
                     console.log(`🔓 Releasing seat ${seat._id} - Lock TTL exceeded`);
                 }
             }

@@ -244,16 +244,24 @@ describe('BookingService', () => {
             });
 
             (lockService.isLocked as jest.Mock).mockResolvedValue(true);
+            (lockService.getLockInfo as jest.Mock).mockResolvedValue({
+                lockId: 'lock-uuid-123',
+                userId,
+                acquiredAt: Date.now() - 700000
+            });
             (lockService.releaseLock as jest.Mock).mockResolvedValue(true);
             (lockService.getLockTTL as jest.Mock).mockReturnValue(600);
-            (lockService.getLockKey as jest.Mock).mockReturnValue(`lock:seats:${seatId}`);
             (sseService.broadcastSeatUpdate as jest.Mock).mockResolvedValue(undefined);
 
             await bookingService.cleanupExpiredLocks();
 
             const seat = await Seat.findById(seatId);
             expect(seat!.status).toBe('available');
-            expect(lockService.releaseLock).toHaveBeenCalledWith(`seats:${seatId.toString()}`, `lock:seats:${seatId}`)
+            expect(lockService.releaseLock).toHaveBeenCalledWith(
+                `seats:${seatId.toString()}`,
+                'lock-uuid-123'
+            );
+            expect(lockService.getLockKey).not.toHaveBeenCalled();
         });
 
         it('should clean up expired locks when redis lock is not found', async () => {
