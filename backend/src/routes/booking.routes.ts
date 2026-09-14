@@ -4,11 +4,12 @@ import { authMiddleware, AuthRequest } from '../middleware/auth.middleware';
 import { bookingService } from '../services/booking.service';
 import { queueService } from '../services/queue.service';
 import { v4 as uuidv4 } from 'uuid';
+import { lockRateLimit } from '../middleware/rateLimit.middleware';
 
 const router = Router();
 
 // Lock seats (join queue and acquire distributed lock)
-router.post('/lock', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/lock', authMiddleware, lockRateLimit, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { eventId, seatIds } = req.body;
         const userId = req.userId!;

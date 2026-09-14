@@ -20,7 +20,7 @@ describe('Auth Middleware', () => {
 
     it('should authenticate with valid token', () => {
         const userId = 'user-123';
-        const token = jwt.sign({ userId }, process.env.JWT_SECRET || 'your-super-secret-jwt-key');
+        const token = jwt.sign({ userId }, process.env.JWT_SECRET!);
 
         (mockRequest.header as jest.Mock).mockReturnValue(`Bearer ${token}`);
 
@@ -55,7 +55,7 @@ describe('Auth Middleware', () => {
         const userId = 'user-123';
         const token = jwt.sign(
             { userId },
-            process.env.JWT_SECRET || 'your-super-secret-jwt-key',
+            process.env.JWT_SECRET!,
             { expiresIn: '-1h' } // Expired 1 hour ago
         );
 
@@ -66,5 +66,19 @@ describe('Auth Middleware', () => {
         expect(mockResponse.status).toHaveBeenCalledWith(401);
         expect(mockResponse.json).toHaveBeenCalledWith({ error: 'Invalid or expired token' });
         expect(nextFunction).not.toHaveBeenCalled();
+    });
+
+    it('should fail closed when JWT_SECRET is missing', () => {
+        const previous = process.env.JWT_SECRET;
+        delete process.env.JWT_SECRET;
+        (mockRequest.header as jest.Mock).mockReturnValue('Bearer not-a-real-token');
+
+        authMiddleware(mockRequest as AuthRequest, mockResponse as Response, nextFunction);
+
+        expect(mockResponse.status).toHaveBeenCalledWith(500);
+        expect(mockResponse.json).toHaveBeenCalledWith({ error: 'Server misconfigured' });
+        expect(nextFunction).not.toHaveBeenCalled();
+
+        process.env.JWT_SECRET = previous;
     });
 });

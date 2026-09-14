@@ -2,11 +2,13 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User';
+import { getJwtSecret } from '../config/auth';
+import { authRateLimit } from '../middleware/rateLimit.middleware';
 
 const router = Router();
 
 // Register new user
-router.post('/register', async (req: Request, res: Response): Promise<void> => {
+router.post('/register', authRateLimit, async (req: Request, res: Response): Promise<void> => {
     try {
         const { email, password, name } = req.body;
 
@@ -34,8 +36,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
         });
 
         // Generate JWT
-        const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
-        const token = jwt.sign({ userId: user._id.toString() }, jwtSecret, {
+        const token = jwt.sign({ userId: user._id.toString() }, getJwtSecret(), {
             expiresIn: '7d',
         });
 
@@ -54,7 +55,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
 });
 
 // Login user
-router.post('/login', async (req: Request, res: Response): Promise<void> => {
+router.post('/login', authRateLimit, async (req: Request, res: Response): Promise<void> => {
     try {
         const { email, password } = req.body;
 
@@ -79,8 +80,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
         }
 
         // Generate JWT
-        const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
-        const token = jwt.sign({ userId: user._id.toString() }, jwtSecret, {
+        const token = jwt.sign({ userId: user._id.toString() }, getJwtSecret(), {
             expiresIn: '7d',
         });
 

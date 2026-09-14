@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { connectDatabase } from './config/database';
 import { errorHandler } from './middleware/error.middleware';
 import { jobService } from './services/job.service';
+import { getJwtSecret } from './config/auth';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -20,8 +21,13 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
+const corsOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
+    : process.env.NODE_ENV === 'production'
+        ? false
+        : 'http://localhost:5173';
+
+app.use(cors({ origin: corsOrigins, credentials: true }));
 app.use(express.json());
 
 // Health check
@@ -46,8 +52,8 @@ const startServer = async () => {
     try {
         // Connect to MongoDB
         await connectDatabase();
+        getJwtSecret();
 
-        // Initialize BullMQ jobs
         await jobService.scheduleCleanupJob();
         await jobService.scheduleQueueProcessorJob();
 
