@@ -49,6 +49,7 @@ const startServer = async () => {
 
         // Initialize BullMQ jobs
         await jobService.scheduleCleanupJob();
+        await jobService.scheduleQueueProcessorJob();
 
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);

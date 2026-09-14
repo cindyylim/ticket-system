@@ -2,10 +2,9 @@ import { redisService } from './redis.service';
 
 class QueueService {
     private readonly MAX_CONCURRENT_PROCESSING = 10; // Process 10 bookings at a time per event
-    private readonly PROCESSING_INTERVAL = 2000; // Process every 2 seconds
+    private readonly PROCESSING_INTERVAL = 2000; // Used for wait estimates; BullMQ ticks at this interval
     private readonly PROCESSING_LOCK_TTL = 5; // Lock TTL in seconds
     private readonly ACTIVE_TTL_MS = 90_000; // Admission slot expires if the user never locks
-    private processingIntervals: Map<string, NodeJS.Timeout> = new Map();
 
     private getQueueKey(eventId: string): string {
         return `queue:${eventId}`;
@@ -21,6 +20,10 @@ class QueueService {
 
     private getMemberKey(eventId: string, userId: string): string {
         return `queue:member:${eventId}:${userId}`;
+    }
+
+    private getTrackedEventsKey(): string {
+        return 'queue:tracked';
     }
 
     private serializeEntry(userId: string, requestId: string): string {
@@ -70,10 +73,7 @@ class QueueService {
         const member = this.serializeEntry(userId, requestId);
         await redisService.zadd(queueKey, Date.now(), member);
         await redisService.set(memberKey, member);
-
-        if (!this.processingIntervals.has(eventId)) {
-            this.startProcessing(eventId);
-        }
+        await redisService.sadd(this.getTrackedEventsKey(), eventId);
 
         const rank = await redisService.zrank(queueKey, member);
         const position = rank !== null ? rank + 1 : 1;
@@ -115,7 +115,7 @@ class QueueService {
         const activeCount = await redisService.zcard(activeKey);
 
         if (queueLength === 0 && activeCount === 0) {
-            this.stopProcessing(eventId);
+            await redisService.srem(this.getTrackedEventsKey(), eventId);
         }
     }
 
@@ -135,20 +135,11 @@ class QueueService {
         return { length, estimatedWaitTime };
     }
 
-    private startProcessing(eventId: string): void {
-        if (this.processingIntervals.has(eventId)) return;
-
-        console.log(`🚀 Starting queue processing for event ${eventId}`);
-
-        const interval = setInterval(async () => {
-            try {
-                await this.processQueue(eventId);
-            } catch (error) {
-                console.error(`Error processing queue for event ${eventId}:`, error);
-            }
-        }, this.PROCESSING_INTERVAL);
-
-        this.processingIntervals.set(eventId, interval);
+    async processPendingQueues(): Promise<void> {
+        const eventIds = await redisService.smembers(this.getTrackedEventsKey());
+        for (const eventId of eventIds) {
+            await this.processQueue(eventId);
+        }
     }
 
     private async processQueue(eventId: string): Promise<void> {
@@ -175,7 +166,7 @@ class QueueService {
 
             if (queueLength === 0) {
                 if (activeCount === 0) {
-                    this.stopProcessing(eventId);
+                    await redisService.srem(this.getTrackedEventsKey(), eventId);
                 }
                 return;
             }
@@ -202,15 +193,6 @@ class QueueService {
             }
         } finally {
             await redisService.del(lockKey);
-        }
-    }
-
-    private stopProcessing(eventId: string): void {
-        const interval = this.processingIntervals.get(eventId);
-        if (interval) {
-            clearInterval(interval);
-            this.processingIntervals.delete(eventId);
-            console.log(`🛑 Stopped processing queue for event ${eventId}`);
         }
     }
 }

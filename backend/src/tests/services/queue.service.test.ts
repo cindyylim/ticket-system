@@ -9,21 +9,15 @@ describe('QueueService', () => {
     const requestId = 'req-789';
 
     beforeEach(() => {
-        jest.useFakeTimers();
         jest.clearAllMocks();
         (redisService.zremrangebyscore as jest.Mock).mockResolvedValue(0);
         (redisService.zscore as jest.Mock).mockResolvedValue(null);
         (redisService.get as jest.Mock).mockResolvedValue(null);
         (redisService.zcard as jest.Mock).mockResolvedValue(0);
         (redisService.zrank as jest.Mock).mockResolvedValue(0);
-    });
-
-    afterEach(() => {
-        const serviceAny = queueService as any;
-        for (const id of [...serviceAny.processingIntervals.keys()]) {
-            serviceAny.stopProcessing(id);
-        }
-        jest.useRealTimers();
+        (redisService.smembers as jest.Mock).mockResolvedValue([]);
+        (redisService.sadd as jest.Mock).mockResolvedValue(1);
+        (redisService.srem as jest.Mock).mockResolvedValue(1);
     });
 
     describe('joinQueue', () => {
@@ -59,6 +53,7 @@ describe('QueueService', () => {
                 expect.any(Number),
                 `${userId}:${requestId}`
             );
+            expect(redisService.sadd).toHaveBeenCalledWith('queue:tracked', eventId);
         });
 
         it('should enqueue behind existing waiters even if active count is below cap', async () => {
@@ -199,6 +194,18 @@ describe('QueueService', () => {
             await serviceAny.processQueue(eventId);
 
             expect(redisService.zpopmin).not.toHaveBeenCalled();
+        });
+
+        it('should process every tracked event', async () => {
+            const serviceAny = queueService as any;
+            const processSpy = jest.spyOn(serviceAny, 'processQueue').mockResolvedValue(undefined);
+            (redisService.smembers as jest.Mock).mockResolvedValue(['event-a', 'event-b']);
+
+            await queueService.processPendingQueues();
+
+            expect(processSpy).toHaveBeenCalledWith('event-a');
+            expect(processSpy).toHaveBeenCalledWith('event-b');
+            processSpy.mockRestore();
         });
     });
 });

@@ -1,7 +1,7 @@
 import { jobService } from '../../services/job.service';
 
-// Mock booking service
 jest.mock('../../services/booking.service');
+jest.mock('../../services/queue.service');
 
 describe('JobService', () => {
     beforeEach(() => {
@@ -53,6 +53,24 @@ describe('JobService', () => {
 
             expect(consoleSpy).toHaveBeenCalledWith('Failed to schedule cleanup job:', expect.any(Error));
             consoleSpy.mockRestore();
+        });
+    });
+
+    describe('scheduleQueueProcessorJob', () => {
+        it('should schedule the waiting-room processor on a 2s interval', async () => {
+            const queue = await jobService.getAdmissionQueue();
+            (queue.getRepeatableJobs as jest.Mock).mockResolvedValue([]);
+            (queue.add as jest.Mock).mockResolvedValue({ id: 'job-id' });
+
+            await jobService.scheduleQueueProcessorJob();
+
+            expect(queue.add).toHaveBeenCalledWith(
+                'process-waiting-queues',
+                {},
+                expect.objectContaining({
+                    repeat: { every: 2000 }
+                })
+            );
         });
     });
 });

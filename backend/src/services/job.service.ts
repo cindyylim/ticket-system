@@ -1,12 +1,15 @@
 import { Queue, Worker, Job } from 'bullmq';
 import { bookingService } from './booking.service';
+import { queueService } from './queue.service';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 class JobService {
     private cleanupQueue: Queue;
-    private worker: Worker;
+    private admissionQueue: Queue;
+    private cleanupWorker: Worker;
+    private admissionWorker: Worker;
     private readonly REDIS_OPTIONS = {
         connection: {
             url: process.env.REDIS_URI || 'redis://localhost:6379',
@@ -14,11 +17,10 @@ class JobService {
     };
 
     constructor() {
-        // Initialize the queue
         this.cleanupQueue = new Queue('lock-cleanup', this.REDIS_OPTIONS);
+        this.admissionQueue = new Queue('waiting-queue', this.REDIS_OPTIONS);
 
-        // Initialize the worker
-        this.worker = new Worker(
+        this.cleanupWorker = new Worker(
             'lock-cleanup',
             async (job: Job) => {
                 if (job.name === 'cleanup-expired-locks') {
@@ -30,33 +32,44 @@ class JobService {
             this.REDIS_OPTIONS
         );
 
-        this.worker.on('completed', (job) => {
-            console.log(`Job ${job.id} completed!`);
-        });
+        this.admissionWorker = new Worker(
+            'waiting-queue',
+            async (job: Job) => {
+                if (job.name === 'process-waiting-queues') {
+                    await queueService.processPendingQueues();
+                }
+            },
+            this.REDIS_OPTIONS
+        );
 
-        this.worker.on('failed', (job, err) => {
+        const onCompleted = (job: Job) => {
+            console.log(`Job ${job.id} completed!`);
+        };
+        const onFailed = (job: Job | undefined, err: Error) => {
             console.error(`Job ${job?.id} failed with error: ${err.message}`);
-        });
+        };
+
+        this.cleanupWorker.on('completed', onCompleted);
+        this.cleanupWorker.on('failed', onFailed);
+        this.admissionWorker.on('completed', onCompleted);
+        this.admissionWorker.on('failed', onFailed);
 
         console.log('🚀 JobService initialized with BullMQ');
     }
 
-    // Schedule repeatable cleanup job
     async scheduleCleanupJob() {
         try {
-            // Remove existing repeatable jobs to avoid duplicates if service restarts
             const repeatableJobs = await this.cleanupQueue.getRepeatableJobs();
             for (const job of repeatableJobs) {
                 await this.cleanupQueue.removeRepeatableByKey(job.key);
             }
 
-            // Add the repeatable job (runs every 1 minute)
             await this.cleanupQueue.add(
                 'cleanup-expired-locks',
                 {},
                 {
                     repeat: {
-                        pattern: '*/1 * * * *', // Every minute
+                        pattern: '*/1 * * * *',
                     },
                     removeOnComplete: true,
                     removeOnFail: true,
@@ -69,13 +82,44 @@ class JobService {
         }
     }
 
+    async scheduleQueueProcessorJob() {
+        try {
+            const repeatableJobs = await this.admissionQueue.getRepeatableJobs();
+            for (const job of repeatableJobs) {
+                await this.admissionQueue.removeRepeatableByKey(job.key);
+            }
+
+            await this.admissionQueue.add(
+                'process-waiting-queues',
+                {},
+                {
+                    repeat: {
+                        every: 2000,
+                    },
+                    removeOnComplete: true,
+                    removeOnFail: true,
+                }
+            );
+
+            console.log('📅 Waiting-queue processor scheduled every 2 seconds');
+        } catch (error) {
+            console.error('Failed to schedule queue processor job:', error);
+        }
+    }
+
     async getQueue() {
         return this.cleanupQueue;
     }
 
+    async getAdmissionQueue() {
+        return this.admissionQueue;
+    }
+
     async disconnect() {
-        await this.worker.close();
+        await this.cleanupWorker.close();
+        await this.admissionWorker.close();
         await this.cleanupQueue.close();
+        await this.admissionQueue.close();
     }
 }
 
