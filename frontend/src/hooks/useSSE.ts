@@ -21,7 +21,6 @@ export const useSSE = (eventId: string | null, options?: UseSSEOptions) => {
         const eventSource = new EventSource(`/api/sse/events/${eventId}/seats`);
 
         eventSource.onopen = () => {
-            console.log('SSE connected for event:', eventId);
             setConnected(true);
         };
 
@@ -36,10 +35,9 @@ export const useSSE = (eventId: string | null, options?: UseSSEOptions) => {
         };
 
         eventSource.onerror = (error) => {
-            console.error('SSE error:', error);
             setConnected(false);
             optionsRef.current?.onError?.(error);
-            eventSource.close();
+            // Do not close — the browser retries the stream automatically.
         };
 
         return eventSource;
