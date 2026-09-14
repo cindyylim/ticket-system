@@ -1,3 +1,7 @@
+process.env.REDIS_URI = process.env.REDIS_URI || 'redis://127.0.0.1:6379';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret';
+process.env.NODE_ENV = process.env.NODE_ENV || 'test';
+
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 

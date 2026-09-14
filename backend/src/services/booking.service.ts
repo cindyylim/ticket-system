@@ -107,33 +107,70 @@ class BookingService {
                 }
             }
 
-            // Get seats to calculate total price
+            const uniqueSeatIds = [...new Set(seatIds)];
+            if (uniqueSeatIds.length !== seatIds.length) {
+                return { success: false, message: 'Duplicate seats in booking request' };
+            }
+
+            const userObjectId = new Types.ObjectId(userId);
             const seats = await Seat.find({ _id: { $in: objectIdSeats } });
+            if (seats.length !== uniqueSeatIds.length) {
+                return { success: false, message: 'Some seats do not exist' };
+            }
             const totalPrice = seats.reduce((sum, seat) => sum + seat.price, 0);
 
-            // Update seats to booked
-            await Seat.updateMany(
-                { _id: { $in: objectIdSeats } },
+            // Claim seats only if this user still holds the Mongo lock.
+            // Concurrent confirms for the same lockIds: winner takes all rows, loser gets modifiedCount 0.
+            const claim = await Seat.updateMany(
+                {
+                    _id: { $in: objectIdSeats },
+                    eventId: new Types.ObjectId(eventId),
+                    status: 'locked',
+                    lockedBy: userObjectId,
+                },
                 {
                     $set: {
                         status: 'booked',
-                        bookedBy: new Types.ObjectId(userId),
+                        bookedBy: userObjectId,
                         bookedAt: new Date(),
                     },
                     $unset: { lockedBy: '', lockedAt: '' },
                 }
             );
 
-            // Create booking record
-            const booking = await Booking.create({
-                userId: new Types.ObjectId(userId),
-                eventId: new Types.ObjectId(eventId),
-                seatIds: objectIdSeats,
-                totalPrice,
-                status: 'confirmed',
-                paymentStatus: 'completed',
-                confirmedAt: new Date(),
-            });
+            if (claim.modifiedCount !== uniqueSeatIds.length) {
+                return { success: false, message: 'Seats are no longer held by this booking attempt' };
+            }
+
+            let booking;
+            try {
+                booking = await Booking.create({
+                    userId: userObjectId,
+                    eventId: new Types.ObjectId(eventId),
+                    seatIds: objectIdSeats,
+                    totalPrice,
+                    status: 'confirmed',
+                    paymentStatus: 'completed',
+                    confirmedAt: new Date(),
+                });
+            } catch (createError) {
+                await Seat.updateMany(
+                    {
+                        _id: { $in: objectIdSeats },
+                        status: 'booked',
+                        bookedBy: userObjectId,
+                    },
+                    {
+                        $set: {
+                            status: 'locked',
+                            lockedBy: userObjectId,
+                            lockedAt: new Date(),
+                        },
+                        $unset: { bookedBy: '', bookedAt: '' },
+                    }
+                );
+                throw createError;
+            }
 
             // Release all distributed locks
             for (const [seatId, lockId] of Object.entries(lockIds)) {

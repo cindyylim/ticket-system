@@ -149,6 +149,65 @@ describe('BookingService', () => {
             expect(result.success).toBe(false);
             expect(result.message).toContain('expired or invalid');
         });
+
+        it('should reject a second confirm for the same seats', async () => {
+            await Seat.updateOne({ _id: seatId }, {
+                status: 'locked',
+                lockedBy: new mongoose.Types.ObjectId(userId),
+                lockedAt: new Date()
+            });
+
+            (lockService.getLockInfo as jest.Mock).mockResolvedValue({
+                lockId: 'lock-123',
+                userId,
+                acquiredAt: Date.now()
+            });
+            (lockService.releaseLock as jest.Mock).mockResolvedValue(true);
+            (sseService.broadcastSeatUpdate as jest.Mock).mockResolvedValue(undefined);
+
+            const first = await bookingService.confirmBooking(
+                eventId.toString(),
+                [seatId.toString()],
+                userId,
+                { [seatId.toString()]: 'lock-123' }
+            );
+            const second = await bookingService.confirmBooking(
+                eventId.toString(),
+                [seatId.toString()],
+                userId,
+                { [seatId.toString()]: 'lock-123' }
+            );
+
+            expect(first.success).toBe(true);
+            expect(second.success).toBe(false);
+            expect(second.message).toContain('no longer held');
+            expect(await Booking.countDocuments()).toBe(1);
+        });
+
+        it('should reject confirm when Mongo lock is held by a different user', async () => {
+            await Seat.updateOne({ _id: seatId }, {
+                status: 'locked',
+                lockedBy: new mongoose.Types.ObjectId(),
+                lockedAt: new Date()
+            });
+
+            (lockService.getLockInfo as jest.Mock).mockResolvedValue({
+                lockId: 'lock-123',
+                userId,
+                acquiredAt: Date.now()
+            });
+
+            const result = await bookingService.confirmBooking(
+                eventId.toString(),
+                [seatId.toString()],
+                userId,
+                { [seatId.toString()]: 'lock-123' }
+            );
+
+            expect(result.success).toBe(false);
+            expect(await Booking.countDocuments()).toBe(0);
+            expect((await Seat.findById(seatId))!.status).toBe('locked');
+        });
     });
 
     describe('unlockSeats', () => {
