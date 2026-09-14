@@ -1,11 +1,11 @@
 import { Router, Response } from 'express';
 import { queueService } from '../services/queue.service';
 import { authMiddleware, AuthRequest } from '../middleware/auth.middleware';
+import { eventIdParamValidator, handleValidation } from '../middleware/validate.middleware';
 
 const router = Router();
 
-// Get queue status for user
-router.get('/status/:eventId', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/status/:eventId', authMiddleware, eventIdParamValidator, handleValidation, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { eventId } = req.params;
         const userId = req.userId!;
@@ -26,7 +26,7 @@ router.get('/status/:eventId', authMiddleware, async (req: AuthRequest, res: Res
     }
 });
 
-router.post('/leave/:eventId', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/leave/:eventId', authMiddleware, eventIdParamValidator, handleValidation, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { eventId } = req.params;
         const userId = req.userId!;

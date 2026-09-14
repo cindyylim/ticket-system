@@ -5,21 +5,22 @@ import { bookingService } from '../services/booking.service';
 import { queueService } from '../services/queue.service';
 import { v4 as uuidv4 } from 'uuid';
 import { lockRateLimit } from '../middleware/rateLimit.middleware';
+import {
+    confirmValidators,
+    eventIdParamValidator,
+    handleValidation,
+    lockValidators,
+    unlockValidators,
+} from '../middleware/validate.middleware';
 
 const router = Router();
 
 // Lock seats (join queue and acquire distributed lock)
-router.post('/lock', authMiddleware, lockRateLimit, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/lock', authMiddleware, lockRateLimit, lockValidators, handleValidation, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { eventId, seatIds } = req.body;
         const userId = req.userId!;
 
-        if (!eventId || !seatIds || !Array.isArray(seatIds) || seatIds.length === 0) {
-            res.status(400).json({ error: 'Event ID and seat IDs are required' });
-            return;
-        }
-
-        // Join queue
         const requestId = uuidv4();
         const position = await queueService.joinQueue(eventId, userId, requestId);
 
@@ -56,7 +57,7 @@ router.post('/lock', authMiddleware, lockRateLimit, async (req: AuthRequest, res
 });
 
 // Get queue status
-router.get('/queue/:eventId', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/queue/:eventId', authMiddleware, eventIdParamValidator, handleValidation, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { eventId } = req.params;
         const userId = req.userId!;
@@ -80,29 +81,10 @@ router.get('/queue/:eventId', authMiddleware, async (req: AuthRequest, res: Resp
     }
 });
 
-router.post('/confirm', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/confirm', authMiddleware, confirmValidators, handleValidation, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { eventId, seatIds, lockIds } = req.body;
         const userId = req.userId!;
-
-        if (!eventId || !seatIds || !lockIds) {
-            res.status(400).json({ error: 'Event ID, seat IDs, and lock IDs are required' });
-            return;
-        }
-
-        // Validate that lockIds is an object with seat IDs as keys
-        if (typeof lockIds !== 'object' || Array.isArray(lockIds)) {
-            res.status(400).json({ error: 'Lock IDs must be an object with seat IDs as keys' });
-            return;
-        }
-
-        // Validate that all seat IDs have corresponding lock IDs
-        for (const seatId of seatIds) {
-            if (!lockIds[seatId]) {
-                res.status(400).json({ error: `Missing lock ID for seat ${seatId}` });
-                return;
-            }
-        }
 
         const result = await bookingService.confirmBooking(eventId, seatIds, userId, lockIds);
 
@@ -122,29 +104,10 @@ router.post('/confirm', authMiddleware, async (req: AuthRequest, res: Response):
 });
 
 // Cancel/unlock seats
-router.post('/unlock', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/unlock', authMiddleware, unlockValidators, handleValidation, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { seatIds, lockIds } = req.body;
         const userId = req.userId!;
-
-        if (!seatIds || !lockIds) {
-            res.status(400).json({ error: 'Seat IDs and lock IDs are required' });
-            return;
-        }
-
-        // Validate that lockIds is an object with seat IDs as keys
-        if (typeof lockIds !== 'object' || Array.isArray(lockIds)) {
-            res.status(400).json({ error: 'Lock IDs must be an object with seat IDs as keys' });
-            return;
-        }
-
-        // Validate that all seat IDs have corresponding lock IDs
-        for (const seatId of seatIds) {
-            if (!lockIds[seatId]) {
-                res.status(400).json({ error: `Missing lock ID for seat ${seatId}` });
-                return;
-            }
-        }
 
         const result = await bookingService.unlockSeats(seatIds, userId, lockIds);
 

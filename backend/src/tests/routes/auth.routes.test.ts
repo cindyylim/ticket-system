@@ -33,7 +33,16 @@ describe('Auth Routes', () => {
                 .send({ email: 'test@example.com' })
                 .expect(400);
 
-            expect(response.body).toHaveProperty('error', 'All fields are required');
+            expect(response.body).toHaveProperty('error', 'Password must be at least 8 characters');
+        });
+
+        it('should fail if password is too short', async () => {
+            const response = await request(app)
+                .post('/api/auth/register')
+                .send({ email: 'short@example.com', password: 'short', name: 'Test User' })
+                .expect(400);
+
+            expect(response.body).toHaveProperty('error', 'Password must be at least 8 characters');
         });
 
         it('should fail if email is already registered', async () => {
@@ -86,7 +95,7 @@ describe('Auth Routes', () => {
                 .send({ email: 'login@example.com' })
                 .expect(400);
 
-            expect(response.body).toHaveProperty('error', 'Email and password are required');
+            expect(response.body).toHaveProperty('error', 'Password is required');
         });
 
         it('should fail if email is missing', async () => {
@@ -95,7 +104,7 @@ describe('Auth Routes', () => {
                 .send({ password: 'password123' })
                 .expect(400);
 
-            expect(response.body).toHaveProperty('error', 'Email and password are required');
+            expect(response.body).toHaveProperty('error', 'Valid email is required');
         });
 
         it('should fail with invalid email', async () => {

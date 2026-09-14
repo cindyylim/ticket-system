@@ -4,21 +4,15 @@ import jwt from 'jsonwebtoken';
 import { User } from '../models/User';
 import { getJwtSecret } from '../config/auth';
 import { authRateLimit } from '../middleware/rateLimit.middleware';
+import { handleValidation, loginValidators, registerValidators } from '../middleware/validate.middleware';
 
 const router = Router();
 
 // Register new user
-router.post('/register', authRateLimit, async (req: Request, res: Response): Promise<void> => {
+router.post('/register', authRateLimit, registerValidators, handleValidation, async (req: Request, res: Response): Promise<void> => {
     try {
         const { email, password, name } = req.body;
 
-        // Validate input
-        if (!email || !password || !name) {
-            res.status(400).json({ error: 'All fields are required' });
-            return;
-        }
-
-        // Check if user already exists
         const existingUser = await User.findOne({ email });
         if (existingUser) {
             res.status(400).json({ error: 'Email already registered' });
@@ -55,17 +49,10 @@ router.post('/register', authRateLimit, async (req: Request, res: Response): Pro
 });
 
 // Login user
-router.post('/login', authRateLimit, async (req: Request, res: Response): Promise<void> => {
+router.post('/login', authRateLimit, loginValidators, handleValidation, async (req: Request, res: Response): Promise<void> => {
     try {
         const { email, password } = req.body;
 
-        // Validate input
-        if (!email || !password) {
-            res.status(400).json({ error: 'Email and password are required' });
-            return;
-        }
-
-        // Find user
         const user = await User.findOne({ email });
         if (!user) {
             res.status(401).json({ error: 'Invalid credentials' });
