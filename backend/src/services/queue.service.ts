@@ -4,9 +4,9 @@ class QueueService {
     private readonly MAX_CONCURRENT_PROCESSING = 10; // Process 10 bookings at a time per event
     private readonly PROCESSING_INTERVAL = 2000; // Process every 2 seconds
     private readonly PROCESSING_LOCK_TTL = 5; // Lock TTL in seconds
+    private readonly ACTIVE_TTL_MS = 90_000; // Admission slot expires if the user never locks
     private processingIntervals: Map<string, NodeJS.Timeout> = new Map();
 
-    // Redis key helpers
     private getQueueKey(eventId: string): string {
         return `queue:${eventId}`;
     }
@@ -19,37 +19,62 @@ class QueueService {
         return `processing:${eventId}`;
     }
 
-    // Serialize queue entry to store in sorted set
+    private getMemberKey(eventId: string, userId: string): string {
+        return `queue:member:${eventId}:${userId}`;
+    }
+
     private serializeEntry(userId: string, requestId: string): string {
         return `${userId}:${requestId}`;
     }
 
-    // Deserialize queue entry from sorted set
     private deserializeEntry(member: string): { userId: string; requestId: string } {
-        const [userId, requestId] = member.split(':');
-        return { userId, requestId };
+        const separator = member.indexOf(':');
+        if (separator === -1) {
+            return { userId: member, requestId: '' };
+        }
+        return { userId: member.slice(0, separator), requestId: member.slice(separator + 1) };
     }
 
-    // Join queue for an event
+    private async pruneExpiredActive(eventId: string): Promise<void> {
+        await redisService.zremrangebyscore(this.getActiveKey(eventId), 0, Date.now());
+    }
+
     async joinQueue(eventId: string, userId: string, requestId: string): Promise<number> {
-        // If user is already active, return 0 (meaning pass through)
+        await this.pruneExpiredActive(eventId);
+
         if (await this.canProceed(eventId, userId)) {
             return 0;
         }
 
         const queueKey = this.getQueueKey(eventId);
+        const memberKey = this.getMemberKey(eventId, userId);
+        const existingMember = await redisService.get(memberKey);
+        if (existingMember) {
+            const existingRank = await redisService.zrank(queueKey, existingMember);
+            return existingRank !== null ? existingRank + 1 : 1;
+        }
+
+        const activeCount = await redisService.zcard(this.getActiveKey(eventId));
+        const waiting = await redisService.zcard(queueKey);
+
+        // Under capacity and nobody waiting: skip the waiting room.
+        if (activeCount < this.MAX_CONCURRENT_PROCESSING && waiting === 0) {
+            await redisService.zadd(
+                this.getActiveKey(eventId),
+                Date.now() + this.ACTIVE_TTL_MS,
+                userId
+            );
+            return 0;
+        }
+
         const member = this.serializeEntry(userId, requestId);
-        const timestamp = Date.now();
+        await redisService.zadd(queueKey, Date.now(), member);
+        await redisService.set(memberKey, member);
 
-        // Add to sorted set with timestamp as score
-        await redisService.zadd(queueKey, timestamp, member);
-
-        // Start processing if not already started
         if (!this.processingIntervals.has(eventId)) {
             this.startProcessing(eventId);
         }
 
-        // Get position (1-indexed)
         const rank = await redisService.zrank(queueKey, member);
         const position = rank !== null ? rank + 1 : 1;
 
@@ -58,77 +83,58 @@ class QueueService {
         return position;
     }
 
-    // Get user's position in queue
     async getPosition(eventId: string, userId: string): Promise<number | null> {
-        // If active, they are not in the "waiting" queue
         if (await this.canProceed(eventId, userId)) {
             return 0;
         }
 
-        const queueKey = this.getQueueKey(eventId);
-
-        // Find any entry for this user (they might have multiple requests)
-        const allMembers = await redisService.zrange(queueKey, 0, -1);
-
-        for (let i = 0; i < allMembers.length; i++) {
-            const { userId: entryUserId } = this.deserializeEntry(allMembers[i]);
-            if (entryUserId === userId) {
-                return i + 1; // 1-indexed position
-            }
+        const member = await redisService.get(this.getMemberKey(eventId, userId));
+        if (!member) {
+            return null;
         }
 
-        return null;
+        const rank = await redisService.zrank(this.getQueueKey(eventId), member);
+        return rank !== null ? rank + 1 : null;
     }
 
-    // Remove user from queue (after successful booking or cancellation)
     async removeFromQueue(eventId: string, userId: string): Promise<void> {
         const queueKey = this.getQueueKey(eventId);
         const activeKey = this.getActiveKey(eventId);
+        const memberKey = this.getMemberKey(eventId, userId);
 
-        // Remove from active users if present
-        await redisService.srem(activeKey, userId);
+        await redisService.zrem(activeKey, userId);
 
-        // Remove all entries for this user from waiting queue
-        const allMembers = await redisService.zrange(queueKey, 0, -1);
-        const toRemove = allMembers.filter(member => {
-            const { userId: entryUserId } = this.deserializeEntry(member);
-            return entryUserId === userId;
-        });
-
-        if (toRemove.length > 0) {
-            await redisService.zrem(queueKey, ...toRemove);
+        const member = await redisService.get(memberKey);
+        if (member) {
+            await redisService.zrem(queueKey, member);
+            await redisService.del(memberKey);
             console.log(`📋 User ${userId} removed from queue for event ${eventId}`);
         }
 
-        // Clean up if everything is empty
         const queueLength = await redisService.zcard(queueKey);
-        const activeCount = await redisService.scard(activeKey);
+        const activeCount = await redisService.zcard(activeKey);
 
         if (queueLength === 0 && activeCount === 0) {
             this.stopProcessing(eventId);
-            // Keys will auto-expire or can be cleaned up separately
         }
     }
 
-    // Check if user can proceed (is in active set)
     async canProceed(eventId: string, userId: string): Promise<boolean> {
-        const activeKey = this.getActiveKey(eventId);
-        return await redisService.sismember(activeKey, userId);
+        await this.pruneExpiredActive(eventId);
+        const score = await redisService.zscore(this.getActiveKey(eventId), userId);
+        return score !== null;
     }
 
-    // Get queue stats
     async getQueueStats(eventId: string): Promise<{ length: number; estimatedWaitTime: number }> {
         const queueKey = this.getQueueKey(eventId);
         const length = await redisService.zcard(queueKey);
 
-        // Estimate: each batch processes every PROCESSING_INTERVAL ms
         const batchesAhead = Math.ceil(length / this.MAX_CONCURRENT_PROCESSING);
         const estimatedWaitTime = batchesAhead * this.PROCESSING_INTERVAL;
 
         return { length, estimatedWaitTime };
     }
 
-    // Start processing queue (allow users to proceed in batches)
     private startProcessing(eventId: string): void {
         if (this.processingIntervals.has(eventId)) return;
 
@@ -145,29 +151,28 @@ class QueueService {
         this.processingIntervals.set(eventId, interval);
     }
 
-    // Process queue batch with distributed lock
     private async processQueue(eventId: string): Promise<void> {
         const lockKey = this.getProcessingLockKey(eventId);
         const queueKey = this.getQueueKey(eventId);
         const activeKey = this.getActiveKey(eventId);
 
-        // Try to acquire processing lock (distributed lock pattern)
         const lockAcquired = await redisService.setnx(
             lockKey,
             'locked',
             this.PROCESSING_LOCK_TTL
         );
 
-        // If we can't acquire the lock, another server is processing
         if (!lockAcquired) {
             return;
         }
 
         try {
-            const queueLength = await redisService.zcard(queueKey);
-            const activeCount = await redisService.scard(activeKey);
+            await this.pruneExpiredActive(eventId);
 
-            // If queue is empty, check if we should stop processing
+            const queueLength = await redisService.zcard(queueKey);
+            const activeCount = await redisService.zcard(activeKey);
+            const slots = this.MAX_CONCURRENT_PROCESSING - activeCount;
+
             if (queueLength === 0) {
                 if (activeCount === 0) {
                     this.stopProcessing(eventId);
@@ -175,41 +180,31 @@ class QueueService {
                 return;
             }
 
-            // Process a batch of users
-            const batchSize = Math.min(this.MAX_CONCURRENT_PROCESSING, queueLength);
+            if (slots <= 0) {
+                return;
+            }
 
-            if (batchSize > 0) {
-                // Atomically pop users from the front of the queue
-                const batch = await redisService.zpopmin(queueKey, batchSize);
+            const batchSize = Math.min(slots, queueLength);
+            const batch = await redisService.zpopmin(queueKey, batchSize);
+            const members = batch.filter((_, index) => index % 2 === 0);
 
-                // batch is an array like [member1, score1, member2, score2, ...]
-                // Extract just the members (every other element starting at index 0)
-                const members = batch.filter((_, index) => index % 2 === 0);
+            const expiresAt = Date.now() + this.ACTIVE_TTL_MS;
+            for (const member of members) {
+                const { userId } = this.deserializeEntry(member);
+                await redisService.zadd(activeKey, expiresAt, userId);
+                await redisService.del(this.getMemberKey(eventId, userId));
+                console.log(`✅ User ${userId} moved to active state for event ${eventId}`);
+            }
 
-                // Add users to active set
-                const userIds = members.map(member => {
-                    const { userId } = this.deserializeEntry(member);
-                    return userId;
-                });
-
-                if (userIds.length > 0) {
-                    await redisService.sadd(activeKey, ...userIds);
-
-                    userIds.forEach(userId => {
-                        console.log(`✅ User ${userId} moved to active state for event ${eventId}`);
-                    });
-
-                    const remainingInQueue = await redisService.zcard(queueKey);
-                    console.log(`📋 Processed batch of ${userIds.length} users. Remaining in queue: ${remainingInQueue}`);
-                }
+            if (members.length > 0) {
+                const remainingInQueue = await redisService.zcard(queueKey);
+                console.log(`📋 Processed batch of ${members.length} users. Remaining in queue: ${remainingInQueue}`);
             }
         } finally {
-            // Always release the lock
             await redisService.del(lockKey);
         }
     }
 
-    // Stop processing queue
     private stopProcessing(eventId: string): void {
         const interval = this.processingIntervals.get(eventId);
         if (interval) {

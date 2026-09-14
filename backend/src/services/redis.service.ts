@@ -130,6 +130,15 @@ class RedisService {
         return await this.client.zrange(key, start, stop);
     }
 
+    async zscore(key: string, member: string): Promise<number | null> {
+        const score = await this.client.zscore(key, member);
+        return score === null ? null : Number(score);
+    }
+
+    async zremrangebyscore(key: string, min: number | string, max: number | string): Promise<number> {
+        return await this.client.zremrangebyscore(key, min, max);
+    }
+
     // Set operations
     async sadd(key: string, ...members: string[]): Promise<number> {
         return await this.client.sadd(key, ...members);
