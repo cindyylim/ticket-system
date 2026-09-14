@@ -101,6 +101,34 @@ describe('BookingService', () => {
             expect(result.success).toBe(false);
             expect(lockService.releaseLock).toHaveBeenCalled();
         });
+
+        it('should acquire Redis locks in sorted seat-id order', async () => {
+            const seat2Id = new mongoose.Types.ObjectId();
+            await Seat.create({
+                _id: seat2Id,
+                eventId,
+                section: 'VIP',
+                row: 1,
+                seatNumber: 2,
+                price: 100,
+                status: 'available'
+            });
+
+            (lockService.acquireLock as jest.Mock).mockResolvedValue({
+                acquired: true,
+                lockId: 'lock'
+            });
+            (sseService.broadcastSeatUpdate as jest.Mock).mockResolvedValue(undefined);
+
+            const unordered = [seat2Id.toString(), seatId.toString()];
+            await bookingService.lockSeats(eventId.toString(), unordered, userId);
+
+            const lockedResources = (lockService.acquireLock as jest.Mock).mock.calls.map(
+                (call: string[]) => call[0]
+            );
+            const expected = unordered.map((id) => `seats:${id}`).sort();
+            expect(lockedResources).toEqual(expected);
+        });
     });
 
     describe('confirmBooking', () => {

@@ -13,14 +13,19 @@ class BookingService {
         userId: string
     ): Promise<{ success: boolean; message: string; lockIds?: { [seatId: string]: string } }> {
         try {
-            const objectIdSeats = seatIds.map(id => new Types.ObjectId(id));
+            const uniqueSortedIds = [...new Set(seatIds)].sort();
+            if (uniqueSortedIds.length !== seatIds.length) {
+                return { success: false, message: 'Duplicate seats in booking request' };
+            }
+
+            const objectIdSeats = uniqueSortedIds.map(id => new Types.ObjectId(id));
             const seats = await Seat.find({
                 _id: { $in: objectIdSeats },
                 eventId: new Types.ObjectId(eventId),
             });
 
             // Validate seats exist
-            if (seats.length !== seatIds.length) {
+            if (seats.length !== uniqueSortedIds.length) {
                 return { success: false, message: 'Some seats do not exist' };
             }
 
@@ -33,8 +38,8 @@ class BookingService {
             const acquiredLocks: { [seatId: string]: string } = {};
             const failedSeats: string[] = [];
 
-            // Try to acquire lock for each seat individually
-            for (const seatId of seatIds) {
+            // Acquire in a global order so overlapping multi-seat holds cannot deadlock.
+            for (const seatId of uniqueSortedIds) {
                 const lockResource = `seats:${seatId}`;
                 const lockResult = await lockService.acquireLock(lockResource, userId);
 
@@ -42,13 +47,11 @@ class BookingService {
                     acquiredLocks[seatId] = lockResult.lockId;
                 } else {
                     failedSeats.push(seatId);
-                    break; // If any seat fails, we need to rollback
+                    break;
                 }
             }
 
-            // If we failed to acquire all locks, release the ones we got
             if (failedSeats.length > 0) {
-                // Release acquired locks
                 for (const [seatId, lockId] of Object.entries(acquiredLocks)) {
                     const lockResource = `seats:${seatId}`;
                     await lockService.releaseLock(lockResource, lockId);
@@ -59,9 +62,8 @@ class BookingService {
                 };
             }
 
-            // Update all seats to locked status
-            await Seat.updateMany(
-                { _id: { $in: objectIdSeats } },
+            const claimed = await Seat.updateMany(
+                { _id: { $in: objectIdSeats }, status: 'available' },
                 {
                     $set: {
                         status: 'locked',
@@ -71,7 +73,14 @@ class BookingService {
                 }
             );
 
-            console.log(`🎫 Seats locked for user ${userId}: ${seatIds.join(', ')}`);
+            if (claimed.modifiedCount !== uniqueSortedIds.length) {
+                for (const [seatId, lockId] of Object.entries(acquiredLocks)) {
+                    await lockService.releaseLock(`seats:${seatId}`, lockId);
+                }
+                return { success: false, message: 'Some seats are no longer available' };
+            }
+
+            console.log(`🎫 Seats locked for user ${userId}: ${uniqueSortedIds.join(', ')}`);
 
             // Broadcast seat update via SSE
             const updatedSeats = await Seat.find({ _id: { $in: objectIdSeats } });
