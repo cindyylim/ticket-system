@@ -1,0 +1,94 @@
+.queue-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(0, 8, 20, 0.85);
+    backdrop-filter: blur(8px);
+}
+
+.queue-modal {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    padding: 40px 32px;
+    text-align: center;
+    background: var(--background-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+.queue-modal-spinner {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 24px;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--primary-blue);
+    border-radius: 50%;
+    animation: queue-spin 0.8s linear infinite;
+}
+
+@keyframes queue-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.queue-modal h2 {
+    margin-bottom: 8px;
+    font-size: 24px;
+}
+
+.queue-modal-copy {
+    color: var(--text-secondary);
+    margin-bottom: 28px;
+}
+
+.queue-modal-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 28px;
+}
+
+.queue-modal-stat {
+    padding: 16px;
+    background: var(--background-hover);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+}
+
+.queue-modal-stat-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.queue-modal-stat-value {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.queue-modal-leave {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+}
+
+.queue-modal-leave:hover {
+    color: var(--text-primary);
+}
+
+.queue-modal-hint {
+    margin-top: 24px;
+    font-size: 12px;
+    color: var(--text-muted);
+}

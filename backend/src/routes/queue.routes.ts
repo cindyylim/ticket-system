@@ -26,4 +26,17 @@ router.get('/status/:eventId', authMiddleware, async (req: AuthRequest, res: Res
     }
 });
 
+router.post('/leave/:eventId', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { eventId } = req.params;
+        const userId = req.userId!;
+
+        await queueService.removeFromQueue(eventId, userId);
+        res.json({ left: true });
+    } catch (error) {
+        console.error('Error leaving queue:', error);
+        res.status(500).json({ error: 'Failed to leave queue' });
+    }
+});
+
 export default router;

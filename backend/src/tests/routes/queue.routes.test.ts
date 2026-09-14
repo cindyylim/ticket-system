@@ -68,4 +68,24 @@ describe('Queue Routes', () => {
             expect(response.body).toHaveProperty('error', 'Failed to get queue status');
         });
     });
+
+    describe('POST /api/queue/leave/:eventId', () => {
+        it('should remove the user from the waiting room', async () => {
+            (queueService.removeFromQueue as jest.Mock).mockResolvedValue(undefined);
+
+            const response = await request(app)
+                .post(`/api/queue/leave/${eventId}`)
+                .set('Authorization', `Bearer ${token}`)
+                .expect(200);
+
+            expect(response.body).toEqual({ left: true });
+            expect(queueService.removeFromQueue).toHaveBeenCalledWith(eventId, userId);
+        });
+
+        it('should return 401 if not authenticated', async () => {
+            await request(app)
+                .post(`/api/queue/leave/${eventId}`)
+                .expect(401);
+        });
+    });
 });

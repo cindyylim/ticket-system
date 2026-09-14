@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { apiService } from '../services/api.service';
 import './Checkout.css';
@@ -9,6 +9,8 @@ function Checkout() {
     const { eventId, seatIds, lockIds, expiresIn } = location.state || {};
     const [timeLeft, setTimeLeft] = useState(expiresIn || 600);
     const [confirming, setConfirming] = useState(false);
+    const confirmedRef = useRef(false);
+    const releasedRef = useRef(false);
 
     useEffect(() => {
         if (!eventId || !seatIds || !lockIds) {
@@ -20,6 +22,7 @@ function Checkout() {
             setTimeLeft((prev: number) => {
                 if (prev <= 1) {
                     clearInterval(timer);
+                    void releaseHold();
                     alert('Your lock has expired. Please try again.');
                     navigate(`/events/${eventId}/seats`);
                     return 0;
@@ -28,8 +31,23 @@ function Checkout() {
             });
         }, 1000);
 
-        return () => clearInterval(timer);
+        return () => {
+            clearInterval(timer);
+            if (!confirmedRef.current) {
+                void releaseHold();
+            }
+        };
     }, []);
+
+    const releaseHold = async () => {
+        if (!seatIds || !lockIds || confirmedRef.current || releasedRef.current) return;
+        releasedRef.current = true;
+        try {
+            await apiService.unlockSeats(seatIds, lockIds);
+        } catch (error) {
+            console.error('Failed to unlock seats:', error);
+        }
+    };
 
     const handleConfirmBooking = async () => {
         if (confirming) return;
@@ -37,6 +55,7 @@ function Checkout() {
         setConfirming(true);
         try {
             const result = await apiService.confirmBooking(eventId, seatIds, lockIds);
+            confirmedRef.current = true;
             alert(`Booking confirmed! Booking ID: ${result.bookingId}`);
             navigate('/my-bookings');
         } catch (error: any) {

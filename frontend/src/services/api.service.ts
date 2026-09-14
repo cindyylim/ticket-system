@@ -96,6 +96,11 @@ class ApiService {
         const { data } = await this.api.get(`/queue/status/${eventId}`);
         return data;
     }
+
+    async leaveQueue(eventId: string) {
+        const { data } = await this.api.post(`/queue/leave/${eventId}`);
+        return data;
+    }
 }
 
 export const apiService = new ApiService();
